@@ -1,0 +1,21 @@
+data:
+  n_doppler_vectors: 340
+  n_velocity_bins: 100
+  n_antennas: 4
+  n_classes: 5
+
+model:
+  embedding_dim: 128
+  projection_dim: 64
+  dropout: 0.2
+
+training:
+  batch_size: 64
+  lr: 0.001
+  epochs: 100
+  patience: 10
+
+contrastive:
+  temperature: 0.07
+  epochs_phase1: 50
+  epochs_phase2: 50
