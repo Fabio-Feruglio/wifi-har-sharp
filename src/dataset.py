@@ -1,25 +1,18 @@
-import importlib
-import src.dataset
-import glob
-import scipy.io
 import os
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.signal import spectrogram
-from collections import Counter
+import glob
 import torch
 from torch.utils.data import Dataset
 
 class WiFiDataset(Dataset):
-    def __init__(self, raw_dir, stage='train'):
-        self.raw_dir = raw_dir
+    def __init__(self, processed_dir, stage='train'):
+        
+        self.processed_dir = processed_dir
         self.stage = stage
         
-        # Trova tutti i file .mat
-        self.file_list = glob.glob(os.path.join(raw_dir, '**', '*.mat'), recursive=True)
+        # Trova tutti i file .pt generati dal preprocessing
+        self.file_list = glob.glob(os.path.join(processed_dir, '**', '*.pt'), recursive=True)
         
-        # Mappatura delle classi in ID numerici (es: 'C1' -> 0, 'C2' -> 1...)
-        # Nota: adatta questo dizionario in base ai nomi reali delle tue classi!
+        # Mappatura delle classi in ID numerici (da 0 a 6 per le 7 attività motorie)
         self.class_to_idx = {f'C{i}': i-1 for i in range(1, 8)} 
         
     def __len__(self):
@@ -28,29 +21,18 @@ class WiFiDataset(Dataset):
     def __getitem__(self, idx):
         file_path = self.file_list[idx]
         
-        # 1. Carica i dati MATLAB
-        mat_contents = scipy.io.loadmat(file_path)
-        csi_data = mat_contents['csi_buff']
+        # Caricamento del tensore già pronto (forma originale: 100 x 340)
+        doppler_profile = torch.load(file_path)
         
-        # 2. Estrai la classe dal nome del file
-        filename = os.path.basename(file_path)
-        class_str = filename.replace('.mat', '').split('_')[1] # es: 'C1'
+        # Estrazione sicura della classe tramite il nome della cartella genitore
+        # Se il file si trova in 'processed_data/train/C1/sample_0.pt', os.path.dirname restituisce '.../C1'
+        # os.path.basename su quello restituisce proprio 'C1'
+        class_str = os.path.basename(os.path.dirname(file_path)) 
         label = self.class_to_idx[class_str]
         
-        # 3. Applica l'estrazione Doppler (la stessa logica provata sopra)
-        csi_signal = csi_data[:, 128] # sottoportante centrale
-        _, _, spec = spectrogram(csi_signal, fs=1000, nperseg=256, noverlap=192, return_onesided=False)
-        spec_shifted = np.fft.fftshift(spec, axes=0)
+        # Formattazione finale per PyTorch: (Canali, Altezza/Velocità, Larghezza/Tempo) -> (1, 100, 340)
+        # Usiamo unsqueeze(0) per aggiungere la dimensione del canale di ingresso singolo, per poi usare tranquillamente le convolutional 
+        tensor_data = doppler_profile.unsqueeze(0)
         
-        centro = spec_shifted.shape[0] // 2
-        doppler_profile = spec_shifted[centro-50:centro+50, :] # Taglio a 100 bin di velocità
-        
-        # Se vuoi ridimensionare il tempo esattamente a 340 frame, puoi fare un troncamento o un resize:
-        # Per ora lo tagliamo o lo prendiamo così com'è per il test
-        doppler_profile = doppler_profile[:, :340] 
-        
-        # Trasformiamo in Tensore PyTorch (Aggiungendo la dimensione del canale di input = 1)
-        # Il modello si aspetta solitamente (Canali, Altezza/Velocità, Larghezza/Tempo)
-        tensor_data = torch.tensor(doppler_profile, dtype=torch.float32).unsqueeze(0)
-        
-        return tensor_data, label
+        # Ritorniamo il dato e la label convertita in tensore di tipo Long (per CrossEntropy)
+        return tensor_data, torch.tensor(label, dtype=torch.long)
